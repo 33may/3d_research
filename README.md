@@ -1,0 +1,1 @@
+This repo contains the research to modern techniques in 3d graphics
