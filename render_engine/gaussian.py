@@ -1,21 +1,64 @@
+#!/usr/bin/env python3
+"""
+create_and_show_splats_filament.py
+
+Генерация N искусственных 3D Gaussian Splats
+и их немедленная визуализация с Filament-шейдером "3dgs".
+"""
+
 import numpy as np
 import open3d as o3d
+from open3d.visualization.rendering import (
+    OffscreenRenderer,
+    TGaussianSplatBuffersBuilder,
+    MaterialRecord
+)
 
-# 1. Параметры «шара»
-center = np.array([0.0, 0.0, 0.0])   # центр гауссиана
-sigma  = 0.05                         # дисперсия (чем меньше, тем плотнее облако)
-num_pts = 50_000                      # сколько точек хотим «набрызгать»
+def create_splats(N=50):
+    tpc = o3d.t.geometry.PointCloud()
+    # 1) Позиции (N×3)
+    tpc.point["positions"] = o3d.core.Tensor(
+        np.random.uniform(-1, 1, (N, 3)).astype(np.float32))
+    # 2) Прозрачность (N×1)
+    tpc.point["opacity"] = o3d.core.Tensor(
+        np.linspace(0.2,1.0,N,dtype=np.float32).reshape(N,1))
+    # 3) Поворот (N×4)
+    tpc.point["rot"]   = o3d.core.Tensor(
+        np.tile([1,0,0,0], (N,1)).astype(np.float32))
+    # 4) Масштаб (N×3)
+    tpc.point["scale"] = o3d.core.Tensor(
+        np.full((N,3), 0.1, dtype=np.float32))
+    # 5) Цвета DC (N×3)
+    tpc.point["f_dc"]  = o3d.core.Tensor(
+        np.vstack([np.linspace(0,1,N),
+                   np.zeros(N),
+                   np.linspace(1,0,N)]).T.astype(np.float32))
+    # 6) SH-коэффициенты (N×3×3)
+    tpc.point["f_rest"] = o3d.core.Tensor(
+        np.zeros((N,3,3), dtype=np.float32))
+    return tpc
 
-# 2. Генерируем координаты X,Y,Z ~ N(center, sigma^2)
-xyz = np.random.normal(loc=center, scale=sigma, size=(num_pts, 3))
+def main():
+    tpc = create_splats(200)
+    print(f"Создано сплэтов: {tpc.point['positions'].shape[0]}")
 
-# 3. Цвета (можно задать радиус-зависимый grad или что угодно)
-colors = np.repeat([[1.0, 0.4, 0.0]], repeats=num_pts, axis=0)  # оранжевый
+    # 1) Инициализируем рендерер
+    renderer = OffscreenRenderer(800,600)
+    scene    = renderer.scene
 
-# 4. Собираем point-cloud
-pcd = o3d.geometry.PointCloud()
-pcd.points  = o3d.utility.Vector3dVector(xyz)
-pcd.colors  = o3d.utility.Vector3dVector(colors)
+    # 2) Строим GPU-буферы сплэтов
+    builder = TGaussianSplatBuffersBuilder(tpc)  # :contentReference[oaicite:2]{index=2}
+    buffers = builder.ConstructBuffers()
 
-# 5. Визуализация
-o3d.visualization.draw_geometries([pcd], window_name='Single Gaussian')
+    # 3) Задаём материал "3dgs"
+    mat = MaterialRecord()
+    mat.shader = "3dgs"                          # :contentReference[oaicite:3]{index=3}
+
+    # 4) Добавляем и рендерим
+    scene.add_geometry("gaussian_splats", buffers, mat)
+    img = renderer.render_to_image()
+    o3d.io.write_image("out.png", img)
+    print("Сохранено изображение out.png")
+
+if __name__ == "__main__":
+    main()
